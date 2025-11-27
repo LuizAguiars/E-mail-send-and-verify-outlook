@@ -297,17 +297,31 @@ def task_send(token, subject, form_link):
 
     sent = 0
     for row in trk:
-        if not row["sent_at_iso"]:
+        if not row.get("sent_at_iso"):
             html = f"""
-            Olá, {row['Title']}<br><br>
-            Precisamos de sua atualização cadastral.<br>
-            <a href="{form_link}">Clique aqui para preencher</a><br><br>
-            Obrigado!
+            <p>Prezados, <strong>{row['Title']}</strong>,</p>
+            
+            <p>Em virtude da <strong>Reforma Tributária</strong> em andamento no Brasil, estamos atualizando nosso cadastro de fornecedores para garantir a conformidade com as novas exigências fiscais.</p>
+            
+            <p>Solicitamos que preencha o formulário disponível no link abaixo com as informações atualizadas da sua empresa:</p>
+            
+            <p style="text-align: center; margin: 20px 0;">
+                <a href="{form_link}" style="background-color: #0078D4; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">Preencher Formulário</a>
+            </p>
+            
+            <p>Para mais informações sobre a Reforma Tributária, acesse:<br>
+            <a href="https://www.gov.br/fazenda/pt-br/acesso-a-informacao/acoes-e-programas/reforma-tributaria">https://www.gov.br/fazenda/pt-br/acesso-a-informacao/acoes-e-programas/reforma-tributaria</a></p>
+            
+            <p>Contamos com sua colaboração para mantermos nossos registros atualizados.</p>
+            
+            <p>Atenciosamente,<br>
+            <strong>Statomat Máquinas Especiais</strong></p>
             """
             send_mail(token, row["Email"], subject, html)
-            row["sent_at_iso"] = now.isoformat()+"Z"
+            row["sent_at_iso"] = now.isoformat() + "Z"
             row["due_at_iso"] = (
-                now + dt.timedelta(days=DAYS_DEADLINE)).isoformat()+"Z"
+                now + dt.timedelta(days=DAYS_DEADLINE)
+            ).isoformat() + "Z"
             save_tracking(trk)
             sent += 1
             time.sleep(SLEEP_SECONDS_BETWEEN_MAILS)
@@ -322,44 +336,96 @@ def task_check(token, subject_reminder, form_link):
     trk = load_tracking()
     now = dt.datetime.utcnow()
 
-    # buscar arquivos de resposta
-    files = search_response_files(token, FORM_RESPONSES_HINT)
-    answered = set()
+    # 1) Lê CSV de respostas exportado do Forms
+    answered_emails, answered_domains = load_responses_from_csv(RESPONSES_CSV)
 
-    for d, i, n in files:
-        values = get_workbook_values(token, d, i)
-        answered |= extract_emails(values)
+    print("E-mails respondidos encontrados no CSV:")
+    for e in sorted(answered_emails):
+        print(" -", e)
 
-    # marcar respondidos
+    print("Domínios com pelo menos 1 resposta:")
+    for d in sorted(answered_domains):
+        print(" -", d)
+
+    # 2) Descobre automaticamente quais domínios são "corporativos"
+    all_sent_domains = get_domains_from_tracking(trk)
+    corporate_domains = {
+        d for d in all_sent_domains if d not in GENERIC_DOMAINS
+    }
+
+    print("Domínios corporativos detectados (a partir da sua lista):")
+    for d in sorted(corporate_domains):
+        print(" -", d)
+
+    # 3) Marca respondidos:
+    #    - se o e-mail exato respondeu
+    #    - OU se o domínio é corporativo e alguém desse domínio respondeu
     for row in trk:
-        if not row["responded_at_iso"] and row["Email"] in answered:
-            row["responded_at_iso"] = now.isoformat()+"Z"
+        if row.get("responded_at_iso"):
+            continue  # já marcado antes
+
+        email = (row.get("Email") or "").strip().lower()
+        if not email:
+            continue
+
+        domain = email.split("@")[-1] if "@" in email else ""
+
+        # caso 1: match exato do e-mail
+        if email in answered_emails:
+            row["responded_at_iso"] = now.isoformat() + "Z"
+            continue
+
+        # caso 2: domínio corporativo inteiro válido
+        if domain in corporate_domains and domain in answered_domains:
+            row["responded_at_iso"] = now.isoformat() + "Z"
+            continue
 
     save_tracking(trk)
 
-    # enviar lembrete
+    # 4) Envia lembretes IMEDIATAMENTE para quem não respondeu
     reminded = 0
     for row in trk:
-        if row["responded_at_iso"]:
-            continue
-        if not row["due_at_iso"]:
-            continue
-        if row["reminder_sent_at_iso"]:
+        email = (row.get("Email") or "").strip().lower()
+        if not email:
             continue
 
-        due = dt.datetime.fromisoformat(row["due_at_iso"].replace("Z", ""))
-        if now >= due:
-            html = f"""
-            Olá, {row['Title']}<br><br>
-            Não registramos sua resposta no formulário.<br>
-            <a href="{form_link}">Clique aqui para responder</a><br><br>
-            Obrigado!
-            """
-            send_mail(token, row["Email"], subject_reminder, html)
-            row["reminder_sent_at_iso"] = now.isoformat()+"Z"
-            save_tracking(trk)
-            reminded += 1
-            time.sleep(SLEEP_SECONDS_BETWEEN_MAILS)
+        # Se já respondeu, pula
+        if row.get("responded_at_iso"):
+            continue
+
+        # Envia lembrete imediatamente para quem não respondeu
+        html = f"""
+<p>Prezados, <strong>{row.get('Title', '')}</strong>,</p>
+
+<p>Este é um <strong>lembrete</strong> sobre a atualização cadastral solicitada anteriormente.</p>
+
+<p>Até o momento, <strong>não identificamos sua resposta</strong> ao formulário de atualização de dados relacionado à Reforma Tributária.</p>
+
+<p>Para facilitar, disponibilizamos novamente o link do formulário:</p>
+
+<p style="text-align: center; margin: 20px 0;">
+    <a href="{form_link}" style="background-color: #D83B01; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">Preencher Formulário Agora</a>
+</p>
+
+<p>Sua colaboração é fundamental para mantermos nosso cadastro em conformidade com as novas normas fiscais.</p>
+
+<p>Atenciosamente,<br>
+<strong>Statomat Máquinas Especiais</strong></p>
+
+<hr style="margin-top: 30px; border: none; border-top: 1px solid #ccc;">
+
+<p style="font-size: 12px; color: #666; font-style: italic;">
+Se você já respondeu ao formulário, por favor desconsidere esta mensagem!
+</p>
+"""
+
+        print(f"Enviando lembrete para: {email}")
+        send_mail(token, email, subject_reminder, html)
+
+        row["reminder_sent_at_iso"] = now.isoformat() + "Z"
+        save_tracking(trk)
+        reminded += 1
+        time.sleep(SLEEP_SECONDS_BETWEEN_MAILS)
 
     print("Lembretes enviados:", reminded)
 
