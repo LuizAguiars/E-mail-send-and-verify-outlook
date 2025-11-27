@@ -47,7 +47,7 @@ GENERIC_DOMAINS = {
 def get_token():
     app = msal.PublicClientApplication(
         CLIENT_ID,
-        authority=f"https://login.microsoftonline.com/{TENANT_ID}"
+        authority=f"https://login.microsoftonline.com/{TENANT_ID}",
     )
 
     accounts = app.get_accounts()
@@ -87,99 +87,24 @@ def send_mail(token, to_addr, subject, html_body):
         "message": {
             "subject": subject,
             "body": {"contentType": "HTML", "content": html_body},
-            "toRecipients": [{"emailAddress": {"address": to_addr}}]
+            "toRecipients": [{"emailAddress": {"address": to_addr}}],
         },
-        "saveToSentItems": True
+        "saveToSentItems": True,
     }
     graph_post(token, url, payload)
 
 
 # -----------------------------
-# BUSCAR ARQUIVO DE RESPOSTAS DO FORMS
-# -----------------------------
-def search_response_files(token, hint):
-    found = []
-
-    # OneDrive pessoal
-    try:
-        data = graph_get(token, f"{GRAPH}/me/drive/root/search(q='{hint}')")
-        for item in data.get("value", []):
-            if item.get("file"):
-                found.append(
-                    (item["parentReference"]["driveId"], item["id"], item["name"]))
-    except:
-        pass
-
-    # Teams/Grupos
-    try:
-        groups = graph_get(token, f"{GRAPH}/me/joinedTeams")
-        for g in groups.get("value", []):
-            try:
-                data = graph_get(
-                    token, f"{GRAPH}/groups/{g['id']}/drive/root/search(q='{hint}')")
-                for item in data.get("value", []):
-                    if item.get("file"):
-                        found.append(
-                            (item["parentReference"]["driveId"], item["id"], item["name"]))
-            except:
-                continue
-    except:
-        pass
-
-    # remover duplicados
-    unique = {}
-    for d, i, n in found:
-        unique[(d, i)] = n
-    return [(d, i, n) for (d, i), n in unique.items()]
-
-
-def get_workbook_values(token, drive_id, item_id):
-    sheets = graph_get(
-        token, f"{GRAPH}/drives/{drive_id}/items/{item_id}/workbook/worksheets")
-    ws_id = sheets["value"][0]["id"]
-    rng = graph_get(
-        token,
-        f"{GRAPH}/drives/{drive_id}/items/{item_id}/workbook/worksheets/{ws_id}/usedRange(valuesOnly=true)"
-    )
-    return rng.get("values", [])
-
-
-def extract_emails(matrix):
-    if not matrix or len(matrix) < 2:
-        return set()
-
-    header = [str(h).strip() for h in matrix[0]]
-    rows = matrix[1:]
-
-    # tentar achar a coluna EMAIL primeiro
-    try:
-        col = header.index("Email")
-    except ValueError:
-        # fallback - pega a primeira coluna que contém a palavra email
-        candidates = [i for i, h in enumerate(header) if "email" in h.lower()]
-        if not candidates:
-            return set()
-        col = candidates[0]
-
-    emails = set()
-    for r in rows:
-        if len(r) > col:
-            val = str(r[col]).strip().lower()
-            if "@" in val and "." in val:
-                emails.add(val)
-    return emails
-
-
-# -----------------------------
-# CSV DE TRACKING
+# CSV DE TRACKING E LISTA
 # -----------------------------
 def load_csv_recipients():
     out = []
     with open(INPUT_CSV, encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            title = row["Title"].strip()
-            email = row["Email"].strip().lower()
-            out.append({"Title": title, "Email": email})
+            title = (row.get("Title") or "").strip()
+            email = (row.get("Email") or "").strip().lower()
+            if title and email:
+                out.append({"Title": title, "Email": email})
     return out
 
 
@@ -443,7 +368,8 @@ if __name__ == "__main__":
 
     p_check = sub.add_parser("check")
     p_check.add_argument(
-        "--subject", default="Lembrete: Atualização cadastral pendente")
+        "--subject", default="Lembrete: Atualização cadastral pendente"
+    )
     p_check.add_argument("--form-link", required=True)
 
     args = parser.parse_args()
