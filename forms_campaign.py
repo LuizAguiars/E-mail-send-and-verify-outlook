@@ -13,22 +13,32 @@ load_dotenv()
 
 TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
-FORM_RESPONSES_HINT = os.getenv("FORM_RESPONSES_HINT", "(Responses)")
 
 SCOPES = [
     "User.Read",
     "Mail.Send",
     "Files.Read.All",
-    "Sites.Read.All"
+    "Sites.Read.All",
 ]
-
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 INPUT_CSV = "ConvitesFormulario_IMPORT_MIN.csv"
 TRACKING_CSV = "tracking.csv"
+RESPONSES_CSV = "respostas_forms.csv"
 DAYS_DEADLINE = 7
-SLEEP_SECONDS_BETWEEN_MAILS = 2
+SLEEP_SECONDS_BETWEEN_MAILS = 3
+
+# domínios que NÃO devem ser tratados como “corporativos”
+GENERIC_DOMAINS = {
+    "gmail.com", "gmail.com.br",
+    "outlook.com", "outlook.com.br",
+    "hotmail.com", "hotmail.com.br",
+    "live.com", "live.com.br",
+    "yahoo.com", "yahoo.com.br",
+    "icloud.com",
+    "bol.com.br", "uol.com.br"
+}
 
 
 # -----------------------------
@@ -54,19 +64,14 @@ def get_token():
     return result["access_token"]
 
 
-def graph_get(token, url, params=None):
-    r = requests.get(
-        url, headers={"Authorization": f"Bearer {token}"}, params=params)
-    r.raise_for_status()
-    return r.json()
-
-
 def graph_post(token, url, payload):
     r = requests.post(
         url,
-        headers={"Authorization": f"Bearer {token}",
-                 "Content-Type": "application/json"},
-        data=json.dumps(payload)
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        data=json.dumps(payload),
     )
     if r.status_code >= 400:
         raise RuntimeError(r.text)
@@ -189,8 +194,14 @@ def load_tracking():
 
 
 def save_tracking(rows):
-    fields = ["Title", "Email", "sent_at_iso", "due_at_iso",
-              "responded_at_iso", "reminder_sent_at_iso"]
+    fields = [
+        "Title",
+        "Email",
+        "sent_at_iso",
+        "due_at_iso",
+        "responded_at_iso",
+        "reminder_sent_at_iso",
+    ]
     with open(TRACKING_CSV, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
@@ -208,9 +219,71 @@ def merge_tracking(recipients, tracking):
                 "sent_at_iso": "",
                 "due_at_iso": "",
                 "responded_at_iso": "",
-                "reminder_sent_at_iso": ""
+                "reminder_sent_at_iso": "",
             }
     return list(idx.values())
+
+
+# -----------------------------
+# LER CSV DE RESPOSTAS DO FORMS
+# -----------------------------
+def load_responses_from_csv(path: str):
+    """
+    Lê o CSV exportado do Forms e devolve:
+      - set de e-mails que responderam
+      - set de domínios que já têm alguém respondido
+    Usa a coluna 'Informe um E-mail para contato' como prioridade.
+    """
+    if not os.path.exists(path):
+        print(f"[Aviso] Arquivo de respostas '{path}' não encontrado.")
+        return set(), set()
+
+    with open(path, encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        headers = reader.fieldnames or []
+
+        colname = None
+
+        # 1) prioriza exatamente "Informe um E-mail para contato"
+        for h in headers:
+            if not h:
+                continue
+            if h.strip().lower() == "informe um e-mail para contato":
+                colname = h
+                break
+
+        # 2) se não achar, cai para qualquer coluna com "email" no nome
+        if colname is None:
+            for h in headers:
+                if h and "email" in h.lower():
+                    colname = h
+                    break
+
+        if colname is None:
+            print("[Aviso] Nenhuma coluna de e-mail encontrada no CSV de respostas.")
+            return set(), set()
+
+        emails = set()
+        domains = set()
+
+        for row in reader:
+            raw = (row.get(colname) or "").strip().lower()
+            if "@" in raw and "." in raw:
+                emails.add(raw)
+                dom = raw.split("@")[-1]
+                domains.add(dom)
+
+        return emails, domains
+
+
+def get_domains_from_tracking(trk_rows):
+    domains = set()
+    for row in trk_rows:
+        email = (row.get("Email") or "").strip().lower()
+        if "@" in email:
+            dom = email.split("@")[-1]
+            domains.add(dom)
+    return domains
 
 
 # -----------------------------
