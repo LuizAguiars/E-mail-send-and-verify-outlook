@@ -1,0 +1,98 @@
+# ========================================
+# ARQUIVOS NECESSÁRIOS PARA FUNCIONAMENTO
+# ========================================
+
+## 1. ARQUIVO .env (Credenciais Azure AD)
+## ----------------------------------------
+## Crie um arquivo chamado ".env" na raiz do projeto com:
+
+TENANT_ID=seu-tenant-id-aqui
+CLIENT_ID=seu-client-id-aqui
+
+## Como obter essas credenciais:
+## 1. Acesse https://portal.azure.com
+## 2. Vá em "Azure Active Directory" > "App registrations"
+## 3. Crie um novo registro de aplicativo (tipo: Public client/native)
+## 4. Copie o "Application (client) ID" → CLIENT_ID
+## 5. Copie o "Directory (tenant) ID" → TENANT_ID
+## 6. Em "API permissions", adicione as permissões:
+##    - User.Read
+##    - Mail.Send
+##    - Files.Read.All
+##    - Sites.Read.All
+
+
+## 2. ConvitesFormulario_IMPORT_MIN.csv (Lista de Destinatários)
+## ----------------------------------------------------------------
+## Formato obrigatório: 2 colunas (Title, Email)
+## Exemplo:
+
+Title,Email
+Nome da Empresa 1,contato@empresa1.com.br
+Nome da Empresa 2,contato@empresa2.com.br
+Nome da Empresa 3,suporte@empresa3.com
+
+## - Title: Nome da empresa (aparecerá no email)
+## - Email: Endereço de destino
+
+
+## 3. respostas_forms.csv (Respostas do Microsoft Forms)
+## --------------------------------------------------------
+## Este arquivo é EXPORTADO do Microsoft Forms após as respostas
+## 
+## IMPORTANTE: O CSV deve conter uma coluna chamada exatamente:
+##   "Informe um E-mail para contato"
+##
+## OU qualquer coluna que contenha "email" no nome.
+##
+## Exemplo de cabeçalho completo exportado do Forms:
+
+ID,Hora de início,Hora de conclusão,Email,Nome,Hora da última modificação,Informe um E-mail para contato,Informe o Nome da Empresa (Razão Social),Informe o CNPJ da Empresa,Selecione o Regime de Tributação adotado pela empresa (atual),Devido as alterações da Reforma Tributária pretende mudar o regime tributário da empresa? Se sim indique qual:,Declaro estar ciente da obrigatoriedade de atualizar meus sistemas para a correta emissão de nota fiscal
+
+## Como exportar do Microsoft Forms:
+## 1. Abra seu formulário no Microsoft Forms
+## 2. Vá na aba "Respostas"
+## 3. Clique em "Abrir no Excel" ou "Baixar respostas"
+## 4. Salve como "respostas_forms.csv" (formato CSV UTF-8)
+
+
+## 4. tracking.csv (Gerado Automaticamente)
+## ------------------------------------------
+## Este arquivo é criado e gerenciado automaticamente pelo script
+## NÃO é necessário criar manualmente
+## 
+## Estrutura:
+## Title,Email,sent_at_iso,due_at_iso,responded_at_iso,reminder_sent_at_iso
+
+
+## 5. requirements.txt (Dependências Python)
+## -------------------------------------------
+## Instale as dependências com: pip install -r requirements.txt
+
+requests
+msal
+python-dotenv
+
+
+# ========================================
+# COMANDOS PARA USAR O SCRIPT
+# ========================================
+
+## ENVIAR CONVITES INICIAIS:
+python forms_campaign.py send --subject "Atualização Cadastral - Reforma Tributária" --form-link "https://forms.cloud.microsoft/r/SEU_FORM_ID"
+
+## VERIFICAR RESPOSTAS E ENVIAR LEMBRETES:
+python forms_campaign.py check --form-link "https://forms.cloud.microsoft/r/SEU_FORM_ID"
+
+## Opcional: personalizar assunto do lembrete:
+python forms_campaign.py check --subject "Lembrete Urgente" --form-link "https://forms.cloud.microsoft/r/SEU_FORM_ID"
+
+
+# ========================================
+# CONFIGURAÇÕES IMPORTANTES
+# ========================================
+
+## Intervalo entre emails: 3 segundos (ajustável em forms_campaign.py)
+## Tempo estimado para 600 emails: ~30 minutos
+## Domínios genéricos (não-corporativos): gmail, outlook, hotmail, yahoo, etc.
+## Lógica de resposta: Email exato OU domínio corporativo completo
